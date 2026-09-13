@@ -1,5 +1,5 @@
 import {scrypt,randomBytes,timingSafeEqual,createHash} from 'node:crypto';
-import {env} from 'cloudflare:workers';
+import {env} from '@/lib/runtime-env';
 
 const db=()=> (env as unknown as {DB:D1Database}).DB;
 export class AuthFault extends Error {constructor(message:string,public status=400){super(message);}}
@@ -7,16 +7,18 @@ export type LocalAccount={id:string;name:string;email:string;mobile:string;passw
 export const referralCode=(id:string)=>'NX'+id.replace(/^u-/,'').toUpperCase();
 const digest=(s:string)=>createHash('sha256').update(s).digest('hex');
 let hashing=false;
-async function derive(password:string,salt:string){
+export async function derive(password:string,salt:string){
  // One memory-hard hash at a time in this isolate. Limits remain durable in D1.
  if(hashing)throw new AuthFault('Sign-in is busy. Please retry in a moment.',429);
  hashing=true;
  try{return await new Promise<Buffer>((resolve,reject)=>scrypt(password,Buffer.from(salt,'hex'),32,{N:32768,r:8,p:3,maxmem:64*1024*1024},(error,key)=>error?reject(error):resolve(key)));}
  finally{hashing=false;}
 }
-async function throttle(request:Request,email:string){
+export async function throttle(request:Request,email:string){
  const now=Date.now(),expires=now+15*60*1000;
- const pairs:[[string,number],[string,number]]=[['ip:'+digest(request.headers.get('cf-connecting-ip')||'loopback'),80],['email:'+digest(email),10]];
+ const vercel=(env as unknown as {NEXA_RUNTIME?:string}).NEXA_RUNTIME==='vercel';
+ const ip=request.headers.get(vercel?'x-vercel-forwarded-for':'cf-connecting-ip')||'loopback';
+ const pairs:[[string,number],[string,number]]=[['ip:'+digest(ip),80],['email:'+digest(email),10]];
  const results=await db().batch(pairs.map(([key])=>db().prepare('INSERT INTO auth_limits (key,attempts,expires) VALUES (?,1,?) ON CONFLICT(key) DO UPDATE SET attempts=CASE WHEN expires<=? THEN 1 ELSE attempts+1 END, expires=CASE WHEN expires<=? THEN ? ELSE expires END RETURNING attempts').bind(key,expires,now,now,expires)));
  if(results.some((result,i)=>Number((result.results[0] as {attempts:number}).attempts)>pairs[i][1]))throw new AuthFault('Too many attempts. Please try again in 15 minutes.',429);
  await db().prepare('DELETE FROM auth_limits WHERE expires<?').bind(now).run();

@@ -1,6 +1,7 @@
-import {env} from 'cloudflare:workers';
+import {env} from '@/lib/runtime-env';
 import {seed} from './demo-seed';
-import {publicOrigin,permittedAdmin} from './deployment-access';
+import {publicOrigin,permittedAdmin,appAdminAuth,applicationOrigin} from './deployment-access';
+import {authenticateAdmin,isCurrentAdmin} from './admin-auth';
 import {GatewayFault,createPayin,submitUtr,payinStatus} from './divinepay';
 import {AuthFault,register,authenticate,registeredIdentity,referralCode,type LocalAccount} from './local-auth';
 import {UNIT,type DemoState,type Order,type ViewData} from './demo-types';
@@ -9,14 +10,13 @@ const uid=()=>crypto.randomUUID();
 const response=(value:unknown,status=200,extra:Record<string,string>={})=>Response.json(value,{status,headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff',...extra}});
 class Fault extends Error{constructor(message:string,public status=400){super(message)}}
 function local(request:Request,write=false){
- const url=new URL(request.url);
- const hosted=publicOrigin();
- if(hosted?url.origin!==hosted:!['localhost','127.0.0.1','[::1]'].includes(url.hostname))throw new Fault('This application origin is not enabled.',403);
- if(write && (request.headers.get('origin')!==url.origin || request.headers.get('sec-fetch-site')==='cross-site'))throw new Fault('Use this application from its own page.',403);
+ const origin=applicationOrigin(request);
+ if(!origin)throw new Fault('This application origin is not enabled.',403);
+ if(write && (request.headers.get('origin')!==origin || request.headers.get('sec-fetch-site')==='cross-site'))throw new Fault('Use this application from its own page.',403);
 }
 const cookieName=(admin:boolean)=>admin?'nexa_demo_admin':'nexa_demo_user';
 function token(request:Request,admin:boolean){return request.headers.get('cookie')?.split(';').map(s=>s.trim()).find(s=>s.startsWith(cookieName(admin)+'='))?.split('=')[1]||'';}
-async function identity(request:Request,admin:boolean){if(admin&&publicOrigin())return permittedAdmin(request.headers.get('oai-authenticated-user-id'),request.headers.get('oai-authenticated-user-email'))?'admin':'';const t=token(request,admin);if(!/^[a-f0-9]{64}$/.test(t))return '';const row=await db().prepare('SELECT identity FROM demo_sessions WHERE token=? AND expires>?').bind(t,Date.now()).first<{identity:string}>();const found=row?.identity||'';return admin?found:found&&await registeredIdentity(found)?found:'';}
+async function identity(request:Request,admin:boolean){if(admin&&publicOrigin()&&!appAdminAuth())return permittedAdmin(request.headers.get('oai-authenticated-user-id'),request.headers.get('oai-authenticated-user-email'))?'admin':'';const t=token(request,admin);if(!/^[a-f0-9]{64}$/.test(t))return '';const row=await db().prepare('SELECT identity FROM demo_sessions WHERE token=? AND expires>?').bind(t,Date.now()).first<{identity:string}>();const found=row?.identity||'';return admin?(appAdminAuth()?(isCurrentAdmin(found)?'admin':''):found):found&&await registeredIdentity(found)?found:'';}
 async function read(){await db().prepare('INSERT INTO demo_state (id,data,revision) VALUES (1,?,1) ON CONFLICT(id) DO NOTHING').bind(JSON.stringify(seed(!!publicOrigin()))).run();const row=await db().prepare('SELECT data,revision FROM demo_state WHERE id=1').first<{data:string;revision:number}>();if(!row)throw new Fault('Local records are unavailable.',503);return {state:JSON.parse(row.data) as DemoState,revision:row.revision};}
 function log(s:DemoState,actor:string,action:string,target:string){s.audit.unshift({id:uid(),actor,action,target,time:Date.now()});}
 function entry(s:DemoState,user:string,type:string,amount:number,orderId='',reference='Simulated transaction'){s.ledger.unshift({id:uid(),user,type,amount,orderId,time:Date.now(),reference});}
@@ -57,7 +57,7 @@ export async function GET(request:Request){try{local(request);const admin=new UR
 export async function POST(request:Request){try{local(request,true);const b=await body(request);if(!b||typeof b!=='object')throw new Fault('Invalid request.');const action=txt(b.action,40);const admin=request.headers.get('x-demo-workspace')==='admin';const id=await identity(request,admin);
 if(action==='register'){if(admin)throw new Fault('Use the user registration page.');const account=await register(request,b);await ensureProfile(account);return response({ok:true,message:'Account created. Log in with your email and Nexa app password.'},201);}
 if(action==='login'){
- if(admin){if(publicOrigin())throw new Fault('Use the protected administrator sign-in.',403);if(b.persona!=='admin')throw new Fault('Open the local demo admin.');return sessionResponse(request,true,'admin');}
+ if(admin){if(appAdminAuth())return sessionResponse(request,true,await authenticateAdmin(request,b));if(publicOrigin())throw new Fault('Use the protected administrator sign-in.',403);if(b.persona!=='admin')throw new Fault('Open the local demo admin.');return sessionResponse(request,true,'admin');}
  const account=await authenticate(request,b);await ensureProfile(account);
  return sessionResponse(request,false,account.id);
 }

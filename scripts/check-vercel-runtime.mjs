@@ -1,0 +1,77 @@
+// Focused, offline migration checks. No remote database or payment is contacted.
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import vm from 'node:vm';
+import crypto from 'node:crypto';
+import ts from 'typescript';
+const source=file=>fs.readFileSync(new URL('../'+file,import.meta.url),'utf8');
+let checks=0;
+const check=(condition,label)=>{assert.ok(condition,label);checks++;};
+function moduleFrom(file,imports,extra={}){
+ const exports={};
+ const code=ts.transpileModule(source(file),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;
+ vm.runInNewContext(code,{exports,require:name=>{if(!(name in imports))throw new Error('Unexpected import: '+name);return imports[name];},Buffer,URL,console,...extra},{filename:file});
+ return exports;
+}
+const queries=[];
+let returned={rows:[{created:'1720000000000',expires:'1720000001000',identity:'test'}],rowCount:1};
+let transactions=0;
+const sql={
+ query:(query,values)=>{queries.push({query,values});return Promise.resolve(returned);},
+ transaction:async pending=>{transactions++;return Promise.all(pending);}
+};
+const portable=moduleFrom('lib/runtime-env.vercel.ts',{'server-only':{},'@neondatabase/serverless':{neon:()=>sql}},{process:{env:{DATABASE_URL:'offline-test-only'}}});
+const db=portable.env.DB;
+check(portable.env.NEXA_RUNTIME==='vercel','Vercel runtime selected independently of request headers');
+const injected="someone' OR 1=1 --";
+const row=await db.prepare('SELECT identity,created,expires FROM demo_sessions WHERE token=? AND expires>?').bind(injected,0).first();
+check(queries[0].query.endsWith('token=$1 AND expires>$2'),'SQL placeholders converted');
+check(queries[0].values[0]===injected&&!queries[0].query.includes(injected),'Values remain parameterized');
+check(typeof row.created==='number'&&row.created===1720000000000,'Postgres timestamps normalized');
+check((await db.prepare('UPDATE demo_state SET revision=revision+1 WHERE revision=?').bind(1).run()).meta.changes===1,'CAS row count retained');
+returned={rows:[],rowCount:0};
+check((await db.prepare('UPDATE demo_state SET revision=revision+1 WHERE revision=?').bind(1).run()).meta.changes===0,'CAS conflict retained');
+check(await db.prepare('SELECT identity FROM demo_sessions WHERE token=?').bind('missing').first()===null,'Missing record is null');
+await db.batch([db.prepare('DELETE FROM demo_sessions WHERE expires<?').bind(0),db.prepare('DELETE FROM demo_sessions WHERE token=?').bind('test')]);
+check(transactions===1,'Batch uses one transaction');
+await assert.rejects(()=>db.prepare('SELECT 1; SELECT 2').run());checks++;
+
+const vars={NEXA_RUNTIME:'vercel',NEXA_PUBLIC_ORIGIN:'https://nexa.example'};
+const runtime={'@/lib/runtime-env':{env:vars}};
+const access=moduleFrom('lib/deployment-access.ts',runtime);
+check(access.appAdminAuth(),'App admin auth enabled for Vercel');
+check(!access.permittedAdmin('spoofed','owner@example.test'),'Sites headers never authorize Vercel admins');
+check(access.applicationOrigin(new Request('http://localhost:3000/api/demo',{headers:{host:'nexa.example'}}))==='https://nexa.example','Configured Vercel host survives internal URL normalization');
+check(access.applicationOrigin(new Request('https://nexa.example/api/demo',{headers:{host:'attacker.example'}}))==='','Unconfigured incoming host denied');
+vars.NEXA_PUBLIC_ORIGIN='';
+check(access.applicationOrigin(new Request('http://localhost:3001/api/demo',{headers:{host:'127.0.0.1:3001'}}))==='http://127.0.0.1:3001','Local Next origin uses the actual browser host');
+check(access.applicationOrigin(new Request('http://localhost:3001/api/demo',{headers:{host:'attacker.example:3001'}}))==='','Local origin refuses remote hosts');
+vars.NEXA_PUBLIC_ORIGIN='https://nexa.example';
+const auth=moduleFrom('lib/local-auth.ts',{'node:crypto':crypto,...runtime});
+const admin=moduleFrom('lib/admin-auth.ts',{'node:crypto':crypto,...runtime,'./local-auth':auth});
+check(!admin.appAdminConfigured(),'Missing admin config stays locked');
+const password='offline-admin-'+crypto.randomBytes(20).toString('hex');
+const salt=crypto.randomBytes(16).toString('hex');
+const hash=await auth.derive(password,salt);
+vars.NEXA_ADMIN_EMAIL='owner@example.test';
+vars.NEXA_ADMIN_PASSWORD_HASH='scrypt:32768:8:3:'+salt+':'+hash.toString('hex');
+const sessions=new Map();
+vars.DB={batch:async()=>[{results:[{attempts:1}]},{results:[{attempts:1}]}],prepare:query=>({bind:(...values)=>({run:async()=>({}),first:async()=>sessions.get(values[0])||null})})};
+check(admin.appAdminConfigured(),'Valid separate admin config accepted');
+const request=new Request('https://nexa.example/api/demo');
+const identity=await admin.authenticateAdmin(request,{email:'OWNER@example.test',password});
+check(admin.isCurrentAdmin(identity),'Correct admin password authenticated');
+await assert.rejects(()=>admin.authenticateAdmin(request,{email:'user@example.test',password}),e=>e.status===401);checks++;
+await assert.rejects(()=>admin.authenticateAdmin(request,{persona:'admin'}));checks++;
+check(!await admin.hasAdminSession('invalid'),'Malformed sessions denied');
+const token='a'.repeat(64);sessions.set(token,{identity});
+check(await admin.hasAdminSession(token),'Valid configured admin session accepted');
+sessions.set(token,{identity:'admin'});
+check(!await admin.hasAdminSession(token),'Old one-click admin sessions denied');
+vars.NEXA_ADMIN_EMAIL='changed@example.test';
+check(!admin.isCurrentAdmin(identity),'Admin config rotation invalidates old sessions');
+check(source('lib/demo-server.ts').includes('creditEnabled:false'),'Real wallet credit remains disabled');
+check(source('components/nexa-user.tsx').includes('disabled className="withdraw-placeholder-button"'),'Withdraw remains inactive');
+check(source('app/layout.tsx').includes('className="light"'),'Light theme is the default');
+check(!source('components/demo-login.tsx').includes("'/admin/login'"),'User login does not link to admin');
+console.log(checks+' offline runtime, authentication and UI-contract checks passed. Live database testing is still required.');
