@@ -1,5 +1,5 @@
-import {UNIT,type DemoState,type Order} from './demo-types';
-export function seed(hosted=false):DemoState{
+import {UNIT,type AppState,type Order} from './types';
+export function seed(hosted=false):AppState{
 if(hosted){
  const now=Date.now();
  // Only public seller configuration is carried over. Local accounts, sessions,

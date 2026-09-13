@@ -1,10 +1,11 @@
 import {env} from '@/lib/runtime-env';
-import {seed} from './demo-seed';
+import {readState,storeState} from './private-storage';
+import {seed} from './seed';
 import {publicOrigin,permittedAdmin,appAdminAuth,applicationOrigin} from './deployment-access';
 import {authenticateAdmin,isCurrentAdmin} from './admin-auth';
 import {GatewayFault,createPayin,submitUtr,payinStatus} from './divinepay';
 import {AuthFault,register,authenticate,registeredIdentity,referralCode,adminRegistrationCode,type LocalAccount} from './local-auth';
-import {UNIT,type DemoState,type Order,type ViewData} from './demo-types';
+import {UNIT,type AppState,type Order,type ViewData} from './types';
 const db=()=> (env as unknown as {DB:D1Database}).DB;
 const uid=()=>crypto.randomUUID();
 const response=(value:unknown,status=200,extra:Record<string,string>={})=>Response.json(value,{status,headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff',...extra}});
@@ -17,24 +18,23 @@ function local(request:Request,write=false){
 const cookieName=(admin:boolean)=>admin?'nexa_demo_admin':'nexa_demo_user';
 function token(request:Request,admin:boolean){return request.headers.get('cookie')?.split(';').map(s=>s.trim()).find(s=>s.startsWith(cookieName(admin)+'='))?.split('=')[1]||'';}
 async function identity(request:Request,admin:boolean){if(admin&&publicOrigin()&&!appAdminAuth())return permittedAdmin(request.headers.get('oai-authenticated-user-id'),request.headers.get('oai-authenticated-user-email'))?'admin':'';const t=token(request,admin);if(!/^[a-f0-9]{64}$/.test(t))return '';const row=await db().prepare('SELECT identity FROM demo_sessions WHERE token=? AND expires>?').bind(t,Date.now()).first<{identity:string}>();const found=row?.identity||'';return admin?(appAdminAuth()?(isCurrentAdmin(found)?'admin':''):found):found&&await registeredIdentity(found)?found:'';}
-async function read(){await db().prepare('INSERT INTO demo_state (id,data,revision) VALUES (1,?,1) ON CONFLICT(id) DO NOTHING').bind(JSON.stringify(seed(!!publicOrigin()))).run();const row=await db().prepare('SELECT data,revision FROM demo_state WHERE id=1').first<{data:string;revision:number}>();if(!row)throw new Fault('Local records are unavailable.',503);return {state:JSON.parse(row.data) as DemoState,revision:row.revision};}
-function log(s:DemoState,actor:string,action:string,target:string){s.audit.unshift({id:uid(),actor,action,target,time:Date.now()});}
-function entry(s:DemoState,user:string,type:string,amount:number,orderId='',reference='Simulated transaction'){s.ledger.unshift({id:uid(),user,type,amount,orderId,time:Date.now(),reference});}
-function actorUser(s:DemoState,id:string){const u=s.users.find(u=>u.id===id);if(!u)throw new Fault('Log in to your account to continue.',401);return u;}
-function giveBack(s:DemoState,o:Order,reason:string){const seller=actorUser(s,o.seller);seller.locked-=o.quantity+o.fee;seller.available+=o.quantity+o.fee;o.status='cancelled';o.reason=reason;o.updated=Date.now();const offer=s.offers.find(x=>x.id===o.offerId);if(offer)offer.available+=o.quantity;entry(s,seller.id,'Escrow returned',o.quantity+o.fee,o.id,reason);}
-function release(s:DemoState,o:Order){const seller=actorUser(s,o.seller),buyer=actorUser(s,o.buyer);seller.locked-=o.quantity+o.fee;buyer.available+=o.quantity;s.treasury+=o.fee;o.status='completed';o.updated=Date.now();entry(s,seller.id,'P2P sell',-(o.quantity+o.fee),o.id);entry(s,buyer.id,'P2P buy',o.quantity,o.id);seller.orders++;buyer.orders++;}
-function check(s:DemoState){for(const u of s.users){if(!Number.isSafeInteger(u.available)||!Number.isSafeInteger(u.locked)||u.available<0||u.locked<0)throw new Fault('Balance check failed. No changes saved.',409);const reserved=s.orders.filter(o=>o.seller===u.id&&!['completed','cancelled'].includes(o.status)).reduce((a,o)=>a+o.quantity+o.fee,0);if(reserved!==u.locked)throw new Fault('Escrow check failed. No changes saved.',409);}}
-async function change(fn:(s:DemoState)=>unknown){for(let tries=0;tries<8;tries++){const {state,revision}=await read();const value=fn(state);check(state);const result=await db().prepare('UPDATE demo_state SET data=?,revision=revision+1 WHERE id=1 AND revision=?').bind(JSON.stringify(state),revision).run();if(result.meta.changes===1)return {state,revision:revision+1,value};}throw new Fault('Another update just finished. Please retry.',409);}
+async function read(){await db().prepare('INSERT INTO demo_state (id,data,revision) VALUES (1,?,1) ON CONFLICT(id) DO NOTHING').bind(storeState(seed(!!publicOrigin()))).run();const row=await db().prepare('SELECT data,revision FROM demo_state WHERE id=1').first<{data:string;revision:number}>();if(!row)throw new Fault('Local records are unavailable.',503);return {state:readState<AppState>(row.data),revision:row.revision};}
+function log(s:AppState,actor:string,action:string,target:string){s.audit.unshift({id:uid(),actor,action,target,time:Date.now()});}
+function entry(s:AppState,user:string,type:string,amount:number,orderId='',reference='Simulated transaction'){s.ledger.unshift({id:uid(),user,type,amount,orderId,time:Date.now(),reference});}
+function actorUser(s:AppState,id:string){const u=s.users.find(u=>u.id===id);if(!u)throw new Fault('Log in to your account to continue.',401);return u;}
+function giveBack(s:AppState,o:Order,reason:string){const seller=actorUser(s,o.seller);seller.locked-=o.quantity+o.fee;seller.available+=o.quantity+o.fee;o.status='cancelled';o.reason=reason;o.updated=Date.now();const offer=s.offers.find(x=>x.id===o.offerId);if(offer)offer.available+=o.quantity;entry(s,seller.id,'Escrow returned',o.quantity+o.fee,o.id,reason);}
+function release(s:AppState,o:Order){const seller=actorUser(s,o.seller),buyer=actorUser(s,o.buyer);seller.locked-=o.quantity+o.fee;buyer.available+=o.quantity;s.treasury+=o.fee;o.status='completed';o.updated=Date.now();entry(s,seller.id,'P2P sell',-(o.quantity+o.fee),o.id);entry(s,buyer.id,'P2P buy',o.quantity,o.id);seller.orders++;buyer.orders++;}
+function check(s:AppState){for(const u of s.users){if(!Number.isSafeInteger(u.available)||!Number.isSafeInteger(u.locked)||u.available<0||u.locked<0)throw new Fault('Balance check failed. No changes saved.',409);const reserved=s.orders.filter(o=>o.seller===u.id&&!['completed','cancelled'].includes(o.status)).reduce((a,o)=>a+o.quantity+o.fee,0);if(reserved!==u.locked)throw new Fault('Escrow check failed. No changes saved.',409);}}
+async function change(fn:(s:AppState)=>unknown){for(let tries=0;tries<8;tries++){const {state,revision}=await read();const value=fn(state);check(state);const result=await db().prepare('UPDATE demo_state SET data=?,revision=revision+1 WHERE id=1 AND revision=?').bind(storeState(state),revision).run();if(result.meta.changes===1)return {state,revision:revision+1,value};}throw new Fault('Another update just finished. Please retry.',409);}
 function gatewayConfig(){
- const vars=env as unknown as {DIVINEPAY_API_KEY?:string;NEXA_ENABLE_GATEWAY_CHECKOUT?:string};
- const key=vars.DIVINEPAY_API_KEY||'';
+ const key=String((env as unknown as {DIVINEPAY_API_KEY?:string}).DIVINEPAY_API_KEY||'');
  const configured=key.length>=12&&!['sk_live_xxx','YOUR_API_KEY'].includes(key);
- const enabled=configured&&vars.NEXA_ENABLE_GATEWAY_CHECKOUT==='true';
- return {key,configured,enabled,creditEnabled:false as const,reason:!configured?'DivinePay API key has not been configured.':!enabled?'Gateway checkout is disabled for this local prototype.':'Checkout configured. Wallet credit remains disabled pending settlement and crypto-custody integration.'};
+ // Real INR cannot be collected for the current simulated USDT inventory.
+ return {key,configured,enabled:false,creditEnabled:false as const,reason:configured?'Payments are disabled until real USDT funding and settlement are connected.':'The payment gateway has not been configured.'};
 }
 function gatewayView(){const {key,...safe}=gatewayConfig();return safe;}
 function canExpire(o:Order){return o.status==='awaiting_payment'&&o.expires<Date.now()&&(!o.payment||o.payment.phase==='failed');}
-function view(s:DemoState,id:string,admin:boolean,revision:number):ViewData{
+function view(s:AppState,id:string,admin:boolean,revision:number):ViewData{
  const user=s.users.find(u=>u.id===id)||null;
  const orders=admin?s.orders:s.orders.filter(o=>o.buyer===id||o.seller===id);
  const offers=(admin?s.offers:s.offers.filter(o=>o.createdBy==='admin'&&o.side==='sell'&&o.active&&!actorUser(s,o.owner).blocked)).map(o=>({...o,available:o.side==='sell'?Math.min(o.available,Math.floor(actorUser(s,o.owner).available/(1+s.settings.feeBps/10000))):o.available}));
@@ -92,13 +92,15 @@ if(action==='create_order'){
  if(b.price!==offer.price)throw new Fault('The seller rate changed. Refresh and confirm the updated quote.',409);
  const seller=actorUser(s,offer.owner);
  if(seller.blocked||seller.accountType!=='listing')throw new Fault('This seller is unavailable.');
- const fiat=int(b.fiat,Math.max(500000,offer.min),Math.min(3000000,offer.max)),qty=Math.floor(fiat*UNIT/offer.price),fee=Math.ceil(qty*s.settings.feeBps/10000);
+ const fiat=int(b.fiat,Math.max(500000,offer.min),Math.min(3000000,offer.max)),qty=Math.floor(fiat*UNIT/offer.price);
+ let fee=Math.ceil(qty*s.settings.feeBps/10000);
+ if (qty >= 250 * UNIT) fee = 0;
  if(qty>offer.available||seller.available<qty+fee)throw new Fault('The seller has insufficient available USDT for this purchase.');
  const method=txt(b.method,30);if(!offer.methods.includes(method))throw new Fault('Select an available payment method.');
  seller.available-=qty+fee;seller.locked+=qty+fee;offer.available-=qty;
  const now=Date.now();
- const o:Order={id:'NX-'+uid().slice(0,8).toUpperCase(),offerId:offer.id,buyer:trader.id,seller:seller.id,quantity:qty,fee,price:offer.price,fiat,method,status:'awaiting_payment',created:now,expires:now+Math.min(offer.minutes,s.settings.orderMinutes)*60000,updated:now,messages:[{id:uid(),sender:'System',text:'Test purchase created. Payment gateway is not connected. Do not send money; payment confirmation and wallet credit are disabled.',time:now}],reason:'',createdBy:id,createdFor:trader.id,requestId,requestFingerprint:fingerprint,paymentMode:'gateway_pending',advertiserName:offer.displayName||seller.name};
- s.orders.unshift(o);entry(s,seller.id,'Escrow locked',qty+fee,o.id,'Customer USDT purchase — local test');log(s,id,'Created purchase order',o.id);return {orderId:o.id};
+ const o:Order={id:'NX-'+uid().slice(0,8).toUpperCase(),offerId:offer.id,buyer:trader.id,seller:seller.id,quantity:qty,fee,price:offer.price,fiat,method,status:'awaiting_payment',created:now,expires:now+Math.min(offer.minutes,s.settings.orderMinutes)*60000,updated:now,messages:[{id:uid(),sender:'System',text:'Purchase order created. Please proceed to payment.',time:now}],reason:'',createdBy:id,createdFor:trader.id,requestId,requestFingerprint:fingerprint,paymentMode:'gateway_pending',advertiserName:offer.displayName||seller.name};
+ s.orders.unshift(o);entry(s,seller.id,'Escrow locked',qty+fee,o.id,'Customer USDT purchase');log(s,id,'Created purchase order',o.id);return {orderId:o.id};
 }
 if(action==='order_action'||action==='chat'){
  const o=s.orders.find(o=>o.id===b.orderId);if(!o)throw new Fault('Order not found.',404);

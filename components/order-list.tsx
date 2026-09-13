@@ -4,8 +4,8 @@ import {Input} from '@/components/ui/input';
 import {Button} from '@/components/ui/button';
 import {Table,TableHeader,TableRow,TableHead,TableBody,TableCell} from '@/components/ui/table';
 import {Search,Download,ChevronRight} from 'lucide-react';
-import {FilterTabs,Status,EmptyState,when,csvDownload} from './demo-shared';
-import {inr,usdt,type ViewData,type Order} from '@/lib/demo-types';
+import {FilterTabs,Status,EmptyState,when,csvDownload} from './app-shared';
+import {inr,usdt,type ViewData,type Order} from '@/lib/types';
 export function OrderList({data,admin=false,onlyDisputed=false,compact=false}:{data:ViewData;admin?:boolean;onlyDisputed?:boolean;compact?:boolean}){
  const [filter,setFilter]=useState('all'),[q,setQ]=useState('');const name=(id:string)=>data.users.find(u=>u.id===id)?.name||id;
  const rows=data.orders.filter(o=>(!onlyDisputed||o.status==='disputed')&&(filter==='all'||(filter==='active'?!['completed','cancelled'].includes(o.status):o.status===filter))&&[o.id,name(o.buyer),name(o.seller)].join(' ').toLowerCase().includes(q.toLowerCase())).slice(0,compact?6:1000);

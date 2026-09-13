@@ -10,14 +10,14 @@ import {Checkbox} from '@/components/ui/checkbox';
 import {Table,TableHeader,TableHead,TableRow,TableBody,TableCell} from '@/components/ui/table';
 import {Toaster} from '@/components/ui/sonner';
 import {toast} from 'sonner';
-import {Brand,useDemo,Loading,Stat,Status,Picker,FilterTabs,EmptyState,csvDownload,when,type Action} from './demo-shared';
-import {DemoLogin} from './demo-login';
+import {Brand,useDemo,Loading,Stat,Status,Picker,FilterTabs,EmptyState,csvDownload,when,type Action} from './app-shared';
+import {DemoLogin} from './app-login';
 import {AdminLogin} from './admin-login';
 import {OrderList} from './order-list';
 import {OrderDetail} from './order-detail';
 import {AdsTable} from './nexa-user';
 import {OfferEditor} from './offer-editor';
-import {inr,usdt,number,type ViewData,type Offer} from '@/lib/demo-types';
+import {inr,usdt,number,type ViewData,type Offer} from '@/lib/types';
 const nav=[['dashboard','Overview',LayoutDashboard],['users','Customers & sellers',Users],['orders','Orders',ClipboardList],['offers','Sellers & rates',ArrowDownUp],['disputes','Disputes',ShieldAlert],['reports','Reports & ledger',FileText],['settings','Settings',Settings]] as const;
 export function NexaAdmin({screen='dashboard',orderId='',hosted=false,appAuth=false}:{screen?:string;orderId?:string;hosted?:boolean;appAuth?:boolean}){
  const {data,error,busy,login,refresh,act}=useDemo(true);const [adOpen,setAdOpen]=useState(false),[editingOffer,setEditingOffer]=useState<Offer|null>(null);

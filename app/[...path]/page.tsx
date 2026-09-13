@@ -7,7 +7,7 @@ import {requireChatGPTUser,chatGPTSignOutPath} from '@/app/chatgpt-auth';
 export const dynamic='force-dynamic';
 import {NexaUser} from '@/components/nexa-user';
 import {NexaAdmin} from '@/components/nexa-admin';
-import {DemoLogin} from '@/components/demo-login';
+import {DemoLogin} from '@/components/app-login';
 export default async function Page({params}:{params:Promise<{path:string[]}>}){
 const {path}=await params;
 if(path[0]==='login'&&path.length===1)return <DemoLogin/>;

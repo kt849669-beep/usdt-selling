@@ -1,5 +1,6 @@
 import {scrypt,randomBytes,timingSafeEqual,createHash} from 'node:crypto';
 import {env} from '@/lib/runtime-env';
+import {accountLookup,readAccount,storeAccount} from './private-storage';
 
 const db=()=> (env as unknown as {DB:D1Database}).DB;
 export class AuthFault extends Error {constructor(message:string,public status=400){super(message);}}
@@ -48,17 +49,20 @@ export async function register(request:Request,input:Record<string,unknown>){
   if(!owner)throw new AuthFault('Referral code was not found.');
   referredBy=owner.id;
  }
- const exists=await db().prepare('SELECT id FROM local_accounts WHERE email=? OR mobile=?').bind(email,mobile).first();
+ const emailIndex=accountLookup(email,'email'),mobileIndex=accountLookup(mobile,'mobile');
+ const exists=await db().prepare('SELECT id FROM local_accounts WHERE email=? OR mobile=? OR email=? OR mobile=?').bind(emailIndex,mobileIndex,email,mobile).first();
  if(exists)throw new AuthFault('Unable to register these details. If you already have an account, log in.',409);
  const salt=randomBytes(16).toString('hex'),hash=await derive(password,salt);
  const account:LocalAccount={id:'u-'+randomBytes(8).toString('hex'),name,email,mobile,password_hash:'scrypt:32768:8:3:'+salt+':'+hash.toString('hex'),created:Date.now(),referred_by:referredBy};
- try{await db().prepare('INSERT INTO local_accounts (id,name,email,mobile,password_hash,created,referred_by) VALUES (?,?,?,?,?,?,?)').bind(account.id,name,email,mobile,account.password_hash,account.created,account.referred_by).run();}
+ const stored=storeAccount(account);
+ try{await db().prepare('INSERT INTO local_accounts (id,name,email,mobile,password_hash,created,referred_by) VALUES (?,?,?,?,?,?,?)').bind(stored.id,stored.name,stored.email,stored.mobile,stored.password_hash,stored.created,stored.referred_by).run();}
  catch{throw new AuthFault('Unable to register these details. If you already have an account, log in.',409);}
  return account;
 }
 export async function authenticate(request:Request,input:Record<string,unknown>){
  const {email,password}=credentials(input);await throttle(request,email);
- const account=await db().prepare('SELECT * FROM local_accounts WHERE email=?').bind(email).first<LocalAccount>();
+ const stored=await db().prepare('SELECT * FROM local_accounts WHERE email=? OR email=?').bind(accountLookup(email,'email'),email).first<LocalAccount>();
+ const account=stored?readAccount(stored):null;
  const fields=(account?.password_hash||'scrypt:32768:8:3:00000000000000000000000000000000:'+ '0'.repeat(64)).split(':');
  const derived=await derive(password,fields[4]);
  if(!account||!timingSafeEqual(derived,Buffer.from(fields[5],'hex')))throw new AuthFault('Email or app password is incorrect.',401);

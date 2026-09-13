@@ -3,7 +3,8 @@ import {useState,useEffect} from 'react';
 import {ArrowRight,ShieldCheck,ArrowLeft,LockKeyhole,UserRound,Eye,EyeOff} from 'lucide-react';
 import {Button} from '@/components/ui/button';
 import {Input} from '@/components/ui/input';
-import {Brand} from './demo-shared';
+import {Brand} from './app-shared';
+import {readApiResponse} from '@/lib/api-response';
 export function DemoLogin({admin=false,initialRegister=false}:{admin?:boolean;initialRegister?:boolean}){
  const [signup,setSignup]=useState(initialRegister),[busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
  const [referral,setReferral]=useState('');
@@ -13,8 +14,8 @@ export function DemoLogin({admin=false,initialRegister=false}:{admin?:boolean;in
   e.preventDefault();if(busy)return;setBusy(true);setError('');setNotice('');
   try{
    const payload=admin?{action:'login',persona:'admin'}:signup?{action:'register',name,email,mobile,password,referralCode:referral}:{action:'login',email,password};
-   const response=await fetch('/api/demo',{method:'POST',headers:{'Content-Type':'application/json',...(admin?{'x-demo-workspace':'admin'}:{})},body:JSON.stringify(payload)});
-   const result=await response.json() as {error?:string};if(!response.ok)throw new Error(result.error||'Please try again.');
+   const response=await fetch('/api/server',{method:'POST',headers:{'Content-Type':'application/json',...(admin?{'x-demo-workspace':'admin'}:{})},body:JSON.stringify(payload)});
+   await readApiResponse(response);
    setPassword('');
    if(signup&&!admin){setSignup(false);setNotice('Account created. Log in with your email and new Nexa password.');}
    else location.assign(admin?'/admin':'/');

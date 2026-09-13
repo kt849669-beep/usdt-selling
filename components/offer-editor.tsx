@@ -3,8 +3,8 @@ import {useState} from 'react';
 import {Button} from '@/components/ui/button';
 import {Input} from '@/components/ui/input';
 import {Dialog,DialogContent,DialogHeader,DialogTitle,DialogDescription} from '@/components/ui/dialog';
-import {type Action} from './demo-shared';
-import {UNIT,type ViewData,type Offer} from '@/lib/demo-types';
+import {type Action} from './app-shared';
+import {UNIT,type ViewData,type Offer} from '@/lib/types';
 import {toast} from 'sonner';
 export function OfferEditor({open,onClose,act,busy,offer}:{open:boolean;onClose:()=>void;data:ViewData;act:Action;busy:boolean;admin?:boolean;offer?:Offer|null}){
  const [name,setName]=useState(offer?.displayName||''),[price,setPrice]=useState(String(offer?offer.price/100:98)),[quantity,setQuantity]=useState(String(offer?offer.available/UNIT:10000)),[min,setMin]=useState(String((offer?.min||500000)/100)),[max,setMax]=useState(String((offer?.max||3000000)/100));

@@ -1,6 +1,7 @@
 'use client';
 import {useState,useEffect,useCallback,useRef,type ReactNode} from 'react';
 import {toast} from 'sonner';
+import {readApiResponse} from '@/lib/api-response';
 import {Button} from '@/components/ui/button';
 import {Select,SelectContent,SelectItem,SelectTrigger,SelectValue} from '@/components/ui/select';
 import {Tabs,TabsList,TabsTrigger} from '@/components/ui/tabs';
@@ -8,14 +9,19 @@ import {Skeleton} from '@/components/ui/skeleton';
 import {Empty,EmptyHeader,EmptyTitle,EmptyDescription,EmptyContent,EmptyMedia} from '@/components/ui/empty';
 import {AlertDialog,AlertDialogContent,AlertDialogHeader,AlertDialogTitle,AlertDialogDescription,AlertDialogFooter,AlertDialogAction,AlertDialogCancel} from '@/components/ui/alert-dialog';
 import {RefreshCw,ArrowUpRight,Inbox} from 'lucide-react';
-import {statusLabel,type ViewData} from '@/lib/demo-types';
+import {statusLabel,type ViewData} from '@/lib/types';
 export type Action=(b:Record<string,unknown>)=>Promise<(ViewData&{ok:boolean;result?:{orderId?:string;checkoutUrl?:string;paymentStatus?:string}})|null>;
 export function useDemo(admin=false){
  const [data,setData]=useState<ViewData|null>(null),[error,setError]=useState(''),[busy,setBusy]=useState(false),[login,setLogin]=useState(false);
  const working=useRef(false);
- const refresh=useCallback(async()=>{try{const r=await fetch('/api/demo'+(admin?'?workspace=admin':''),{cache:'no-store'});const b=await r.json() as ViewData & {error?:string};if(r.status===401){setLogin(true);return;}if(!r.ok)throw new Error(b.error);setLogin(false);setError('');setData(old=>!old||b.revision>=old.revision?b:old);}catch(e){setError(e instanceof Error?e.message:'Could not load records.');}},[admin]);
- useEffect(()=>{void refresh();const update=()=>{if(document.visibilityState==='visible'&&!working.current)void refresh();};const timer=setInterval(update,2500);window.addEventListener('focus',update);document.addEventListener('visibilitychange',update);return()=>{clearInterval(timer);window.removeEventListener('focus',update);document.removeEventListener('visibilitychange',update);};},[refresh]);
- const act:Action=useCallback(async b=>{if(working.current)return null;working.current=true;setBusy(true);try{const r=await fetch('/api/demo',{method:'POST',headers:{'Content-Type':'application/json',...(admin?{'x-demo-workspace':'admin'}:{})},body:JSON.stringify(b)});const result=await r.json() as ViewData & {ok:boolean;error?:string;result?:{orderId?:string;checkoutUrl?:string;paymentStatus?:string}};if(!r.ok)throw new Error(result.error);if(result.users)setData(old=>old&&old.revision>result.revision?old:result);return result;}catch(e){toast.error(e instanceof Error?e.message:'Update failed. Please retry.');return null;}finally{working.current=false;setBusy(false);}},[admin]);
+ const refresh=useCallback(async()=>{try{const r=await fetch('/api/server'+(admin?'?workspace=admin':''),{cache:'no-store'});if(r.status===401){setLogin(true);return;}const b=await readApiResponse<ViewData>(r);setLogin(false);setError('');setData(old=>!old||b.revision>=old.revision?b:old);}catch(e){setError(e instanceof Error?e.message:'Could not load records.');}},[admin]);
+ useEffect(()=>{
+  void refresh();
+  const es = new EventSource('/api/events');
+  es.onmessage = () => { if(document.visibilityState==='visible'&&!working.current) void refresh(); };
+  return () => es.close();
+ },[refresh]);
+ const act:Action=useCallback(async b=>{if(working.current)return null;working.current=true;setBusy(true);try{const r=await fetch('/api/server',{method:'POST',headers:{'Content-Type':'application/json',...(admin?{'x-demo-workspace':'admin'}:{})},body:JSON.stringify(b)});const result=await readApiResponse<ViewData & {ok:boolean;result?:{orderId?:string;checkoutUrl?:string;paymentStatus?:string}}>(r);if(result.users)setData(old=>old&&old.revision>result.revision?old:result);return result;}catch(e){toast.error(e instanceof Error?e.message:'Update failed. Please retry.');return null;}finally{working.current=false;setBusy(false);}},[admin]);
  return {data,error,busy,login,refresh,act};
 }
 export function Brand({name='Nexa'}:{name?:string}){return <a className="brand" href="/"><span className="brand-mark">{name[0]?.toUpperCase()||'N'}</span>{name.toUpperCase()}<span className="brand-tag">P2P</span></a>;}

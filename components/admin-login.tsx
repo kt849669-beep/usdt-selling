@@ -3,15 +3,16 @@ import {useState} from 'react';
 import {LockKeyhole,ArrowRight,Eye,EyeOff} from 'lucide-react';
 import {Button} from '@/components/ui/button';
 import {Input} from '@/components/ui/input';
-import {Brand} from './demo-shared';
+import {Brand} from './app-shared';
+import {readApiResponse} from '@/lib/api-response';
 
 export function AdminLogin(){
  const [email,setEmail]=useState(''),[password,setPassword]=useState(''),[show,setShow]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState('');
  async function submit(e:React.FormEvent){
   e.preventDefault();if(busy)return;setBusy(true);setError('');
   try{
-   const response=await fetch('/api/demo',{method:'POST',headers:{'Content-Type':'application/json','x-demo-workspace':'admin'},body:JSON.stringify({action:'login',email,password})});
-   const result=await response.json() as {error?:string};if(!response.ok)throw new Error(result.error||'Unable to sign in.');
+   const response=await fetch('/api/server',{method:'POST',headers:{'Content-Type':'application/json','x-demo-workspace':'admin'},body:JSON.stringify({action:'login',email,password})});
+   await readApiResponse(response);
    setPassword('');location.assign('/admin');
   }catch(e){setError(e instanceof Error?e.message:'Unable to sign in.');}finally{setBusy(false);}
  }

@@ -7,8 +7,8 @@ import {Textarea} from '@/components/ui/textarea';
 import {Dialog,DialogContent,DialogHeader,DialogTitle,DialogDescription} from '@/components/ui/dialog';
 import {toast} from 'sonner';
 import {GatewayCheckout} from './gateway-checkout';
-import {Confirm,Status,when,EmptyState,type Action} from './demo-shared';
-import {inr,usdt,type ViewData} from '@/lib/demo-types';
+import {Confirm,Status,when,EmptyState,type Action} from './app-shared';
+import {inr,usdt,type ViewData} from '@/lib/types';
 export function OrderDetail({data,id,act,busy,admin=false}:{data:ViewData;id:string;act:Action;busy:boolean;admin?:boolean}){
  const o=data.orders.find(x=>x.id===id);const [now,setNow]=useState(Date.now()),[message,setMessage]=useState(''),[reason,setReason]=useState(''),[issue,setIssue]=useState(false),[confirm,setConfirm]=useState('');
  useEffect(()=>{const t=setInterval(()=>setNow(Date.now()),1000);return()=>clearInterval(t);},[]);

@@ -5,8 +5,8 @@ import {Button} from '@/components/ui/button';
 import {Input} from '@/components/ui/input';
 import {Dialog,DialogContent,DialogHeader,DialogTitle,DialogDescription} from '@/components/ui/dialog';
 import {Tabs,TabsList,TabsTrigger} from '@/components/ui/tabs';
-import {Picker,EmptyState,type Action} from './demo-shared';
-import {inr,usdt,UNIT,type ViewData} from '@/lib/demo-types';
+import {Picker,EmptyState,type Action} from './app-shared';
+import {inr,usdt,UNIT,type ViewData} from '@/lib/types';
 export function AdminOrderCreator({data,act,busy,onClose}:{data:ViewData;act:Action;busy:boolean;onClose:()=>void}){
  const [userId,setUserId]=useState(data.users.find(u=>u.accountType==='registered'&&!u.blocked)?.id||''),[side,setSide]=useState('buy'),[offerId,setOfferId]=useState(''),[amount,setAmount]=useState('5000'),[method,setMethod]=useState('UPI'),[created,setCreated]=useState('');
  const [requestId]=useState(()=>crypto.randomUUID());

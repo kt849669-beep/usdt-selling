@@ -5,18 +5,17 @@ import vm from 'node:vm';
 import crypto from 'node:crypto';
 import {DatabaseSync} from 'node:sqlite';
 import ts from 'typescript';
+import {moduleLoader} from './load-test-module.mjs';
 const sqlite=new DatabaseSync(':memory:');
-sqlite.exec(fs.readFileSync(new URL('../postgres/0001_initial.sql',import.meta.url),'utf8'));
+sqlite.exec('CREATE TABLE local_accounts(id TEXT PRIMARY KEY,name TEXT NOT NULL,email TEXT UNIQUE NOT NULL,mobile TEXT UNIQUE NOT NULL,password_hash TEXT NOT NULL,created INTEGER NOT NULL,referred_by TEXT);CREATE TABLE auth_limits(key TEXT PRIMARY KEY,attempts INTEGER,expires INTEGER);');
 const db={prepare(query){return {bind(...values){return {
  first:async()=>sqlite.prepare(query).get(...values)||null,
  run:async()=>sqlite.prepare(query).run(...values),
  all:async()=>({results:sqlite.prepare(query).all(...values)})
 };}};}};
 db.batch=async statements=>{sqlite.exec('BEGIN');try{const results=[];for(const statement of statements)results.push(await statement.all());sqlite.exec('COMMIT');return results;}catch(error){sqlite.exec('ROLLBACK');throw error;}};
-const vars={DB:db,NEXA_RUNTIME:'vercel',NEXA_REGISTRATION_CODE:'NX0123456789ABCDEF'};
-const exports={};
-const source=fs.readFileSync(new URL('../lib/local-auth.ts',import.meta.url),'utf8');
-vm.runInNewContext(ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,{exports,Buffer,console,require:name=>name==='node:crypto'?crypto:name==='@/lib/runtime-env'?{env:vars}:(()=>{throw new Error(name);})()});
+const vars={DB:db,NEXA_RUNTIME:'vercel',NEXA_REGISTRATION_CODE:'NX0123456789ABCDEF',NEXA_DATA_ENCRYPTION_KEY:crypto.randomBytes(32).toString('hex'),NEXA_DATA_LOOKUP_KEY:crypto.randomBytes(32).toString('hex')};
+const exports=moduleLoader(vars)('lib/local-auth.ts');
 const request=new Request('https://nexa.example/api/demo',{headers:{'x-vercel-forwarded-for':'127.0.0.1'}});
 let checks=0;
 const check=(value,label)=>{assert.ok(value,label);checks++;};

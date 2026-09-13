@@ -8,7 +8,7 @@ export type Order={id:string;offerId:string;buyer:string;seller:string;quantity:
 export type Ledger={id:string;user:string;type:string;amount:number;orderId:string;time:number;reference:string};
 export type Audit={id:string;actor:string;action:string;target:string;time:number};
 export type Settings={brand:string;announcement:string;trading:boolean;feeBps:number;orderMinutes:number};
-export type DemoState={users:User[];offers:Offer[];orders:Order[];ledger:Ledger[];audit:Audit[];settings:Settings;treasury:number};
+export type AppState={users:User[];offers:Offer[];orders:Order[];ledger:Ledger[];audit:Audit[];settings:Settings;treasury:number};
 export type ViewData={user:User|null;role:'user'|'admin'|'guest';users:User[];offers:Offer[];orders:Order[];ledger:Ledger[];audit:Audit[];settings:Settings;treasury:number;revision:number;registrationCode?:string;gateway:{configured:boolean;enabled:boolean;creditEnabled:false;reason:string}};
 export const number=(n:number,d=2)=>new Intl.NumberFormat('en-IN',{minimumFractionDigits:d,maximumFractionDigits:d}).format(n);
 export const usdt=(n:number,d=2)=>number(n/UNIT,d);

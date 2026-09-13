@@ -1,3 +1,2 @@
-// Compatibility for tabs with an older JavaScript bundle.
 export {GET,POST} from '@/lib/server';
 export const dynamic='force-dynamic';
