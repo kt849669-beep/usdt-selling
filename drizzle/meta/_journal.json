@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1789295984106,
+      "tag": "0000_late_ben_grimm",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1789298643919,
+      "tag": "0001_confused_raza",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1789300551336,
+      "tag": "0002_pale_nemesis",
+      "breakpoints": true
+    }
+  ]
+}

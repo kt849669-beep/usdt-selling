@@ -1,0 +1,1 @@
+ALTER TABLE `local_accounts` ADD `referred_by` text;

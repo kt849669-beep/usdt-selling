@@ -1,0 +1,78 @@
+import assert from 'node:assert/strict';
+import {randomUUID} from 'node:crypto';
+const base='http://127.0.0.1:5173';
+let checks=0;
+const ok=(value,label)=>{assert.ok(value,label);checks++;};
+function client(admin=false){let cookie='';return {async call(payload,expected=200){const response=await fetch(base+'/api/demo'+(!payload&&admin?'?workspace=admin':''),{method:payload?'POST':'GET',headers:{Origin:base,...(payload?{'Content-Type':'application/json'}:{}),...(admin?{'x-demo-workspace':'admin'}:{}),...(cookie?{Cookie:cookie}:{})},...(payload?{body:JSON.stringify(payload)}:{})});const data=await response.json();assert.equal(response.status,expected,data.error||'Unexpected status');checks++;const set=response.headers.get('set-cookie');if(set)cookie=set.split(';')[0];return data;}};}
+const admin=client(true),user=client(),other=client(),guest=client(),name='QA '+randomUUID().slice(0,8);
+const email=name.toLowerCase().replace(' ','-')+'@example.test',mobile='000'+String(Date.now()).slice(-7),password=randomUUID()+' local-only';
+let userId='',otherId='',offers=[],orders=[],originalSettings;
+try{
+ await admin.call({action:'login',persona:'admin'});
+ const before=await admin.call();originalSettings=before.settings;
+ if(!before.settings.trading)await admin.call({action:'settings',...before.settings,trading:true});
+ await guest.call({action:'login',persona:'u1'},400);
+ await client(true).call(undefined,401);
+ await user.call({action:'register',name,email,mobile,password:'short'},400);
+ await user.call({action:'register',name,email,mobile,password},201);
+ await guest.call({action:'register',name,email,mobile,password},409);
+ await user.call({action:'login',email,password:'wrong-app-password'},401);
+ await user.call({action:'login',email:email.toUpperCase(),password});
+ let state=await user.call();userId=state.user.id;
+ ok(state.user.available===0&&state.user.locked===0,'New user starts at zero');
+ ok(state.user.name===name&&state.user.mobile===mobile,'Registration profile saved');
+ ok(state.user.kyc==='pending','Registration is not KYC verification');
+ ok(!JSON.stringify(state).includes(password)&&!JSON.stringify(state).includes('password_hash'),'No credentials in user response');
+ ok(state.offers.every(o=>o.createdBy==='admin'&&o.side==='sell'&&o.active),'Only active admin sellers are returned');
+ const code=state.user.referralCode;ok(/^NX[0-9A-F]{16}$/.test(code),'Account receives a referral code');
+ ok(!state.gateway.enabled&&!state.gateway.creditEnabled,'Payments and credit disabled without configuration');
+ const otherEmail='other-'+email;
+ await other.call({action:'register',name:name+' Other',email:otherEmail,mobile:'001'+mobile.slice(3),password,referralCode:code},201);
+ await other.call({action:'login',email:otherEmail,password});const referred=await other.call();otherId=referred.user.id;ok(referred.user.referredBy===userId,'Referral attribution survives registration and login');
+ const ad={action:'offer',displayName:name+' Market A',side:'sell',price:9800,available:10000*1000000,min:500000,max:3000000,methods:['UPI']};
+ await user.call(ad,403);
+ await admin.call({...ad,side:'buy'},400);
+ await admin.call({action:'admin_create_order'},400);
+ await admin.call({...ad,min:10000},400);
+ let after=await admin.call(ad);let offer=after.offers.find(o=>o.displayName===ad.displayName);offers.push(offer.id);
+ after=await admin.call({...ad,displayName:name+' Market B',price:9600});const second=after.offers.find(o=>o.displayName===name+' Market B');offers.push(second.id);
+ state=await user.call();
+ ok(state.offers.some(o=>o.id===offer.id&&o.price===9800)&&state.offers.some(o=>o.id===second.id&&o.price===9600),'Different admin names and rates sync to user');
+ const order=(fiat,extra={})=>({action:'create_order',offerId:offer.id,price:offer.price,fiat,method:'UPI',requestId:randomUUID(),...extra});
+ await user.call(order(500000,{side:'sell'}),400);
+ await user.call(order(499999),400);await user.call(order(3000001),400);await user.call(order(500000,{price:9600}),409);
+ const request=order(500000);
+ const pair=await Promise.all([user.call(request),user.call(request)]);
+ const orderId=pair[0].result.orderId;orders.push(orderId);ok(pair[1].result.orderId===orderId,'Concurrent retry creates one order');
+ state=await user.call();let trade=state.orders.find(o=>o.id===orderId);
+ ok(trade.quantity===Math.floor(500000*1000000/9800),'Correct server-side USDT calculation');
+ ok(trade.paymentMode==='gateway_pending'&&trade.status==='awaiting_payment','New order cannot simulate payment');
+ ok(!JSON.stringify(trade).includes('requestFingerprint'),'Private request fingerprint omitted');
+ await other.call({action:'order_action',orderId,operation:'cancel'},403);
+ for(const operation of ['paid','simulate_paid','release','simulate_release','resolve_release'])await user.call({action:'order_action',orderId,operation,confirm:true},409);
+ await user.call({action:'funds',operation:'deposit',amount:100000000},409);
+ await user.call({action:'checkout',orderId},503);
+ state=await user.call();ok(state.user.available===0&&!state.orders.find(o=>o.id===orderId).payment,'Missing key creates no payment attempt or credit');
+ await admin.call({...ad,id:offer.id,displayName:name+' Updated',price:9600});
+ state=await user.call();ok(state.offers.find(o=>o.id===offer.id).price===9600&&state.orders.find(o=>o.id===orderId).price===9800,'Listing rate updates without repricing existing order');
+ ok(!(await other.call()).orders.some(o=>o.id===orderId),'Order isolation');
+ ok(!(await other.call()).users.some(u=>u.email===email||u.mobile===mobile),'Private profile isolation');
+ const all=await admin.call();ok(!JSON.stringify(all).includes(password)&&!JSON.stringify(all).includes('password_hash'),'No password or hash in admin records');
+ const target=all.users.find(u=>u.id===userId);ok(target.email===email&&target.mobile===mobile,'Admin sees legitimate account records');
+ await user.call({action:'order_action',orderId,operation:'cancel'});orders=[];
+ const maximum=await user.call(order(3000000,{price:9600}));orders.push(maximum.result.orderId);
+ await user.call({action:'order_action',orderId:orders[0],operation:'cancel'});orders=[];
+ await admin.call({action:'offer',id:offer.id,active:false});
+ ok(!(await user.call()).offers.some(o=>o.id===offer.id),'Paused listings hidden by server');
+ await user.call(order(500000,{price:9600}),400);
+ await user.call({action:'logout'});ok((await user.call()).user===null,'Logout clears identity');
+ await user.call({action:'login',email,password});ok((await user.call()).user.id===userId,'Login restores saved account');
+ console.log('PASS: '+checks+' registered-account / marketplace / payment-gate checks.');
+}finally{
+ for(const orderId of orders){await user.call({action:'order_action',orderId,operation:'cancel'}).catch(()=>{});}
+ for(const id of offers)await admin.call({action:'offer',id,active:false}).catch(()=>{});
+ for(const id of [userId,otherId].filter(Boolean))await admin.call({action:'user_status',userId:id,blocked:true}).catch(()=>{});
+ if(originalSettings&&!originalSettings.trading){const current=await admin.call();await admin.call({action:'settings',...current.settings,trading:false});}
+ await user.call({action:'logout'}).catch(()=>{});await other.call({action:'logout'}).catch(()=>{});await admin.call({action:'logout'}).catch(()=>{});
+ console.log('Test listings paused; test accounts restricted; test orders cancelled. Existing user records preserved.');
+}
