@@ -19,7 +19,7 @@ export async function throttle(request:Request,email:string){
  const vercel=(env as unknown as {NEXA_RUNTIME?:string}).NEXA_RUNTIME==='vercel';
  const ip=request.headers.get(vercel?'x-vercel-forwarded-for':'cf-connecting-ip')||'loopback';
  const pairs:[[string,number],[string,number]]=[['ip:'+digest(ip),80],['email:'+digest(email),10]];
- const results=await db().batch(pairs.map(([key])=>db().prepare('INSERT INTO auth_limits (key,attempts,expires) VALUES (?,1,?) ON CONFLICT(key) DO UPDATE SET attempts=CASE WHEN expires<=? THEN 1 ELSE attempts+1 END, expires=CASE WHEN expires<=? THEN ? ELSE expires END RETURNING attempts').bind(key,expires,now,now,expires)));
+ const results=await db().batch(pairs.map(([key])=>db().prepare('INSERT INTO auth_limits (key,attempts,expires) VALUES (?,1,?) ON CONFLICT(key) DO UPDATE SET attempts=CASE WHEN auth_limits.expires<=? THEN 1 ELSE auth_limits.attempts+1 END, expires=CASE WHEN auth_limits.expires<=? THEN ? ELSE auth_limits.expires END RETURNING attempts').bind(key,expires,now,now,expires)));
  if(results.some((result,i)=>Number((result.results[0] as {attempts:number}).attempts)>pairs[i][1]))throw new AuthFault('Too many attempts. Please try again in 15 minutes.',429);
  await db().prepare('DELETE FROM auth_limits WHERE expires<?').bind(now).run();
 }
