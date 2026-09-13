@@ -1,5 +1,6 @@
 node_modules
 .git
+.vercel
 .wrangler
 .env*
 .dev.vars*
@@ -10,4 +11,6 @@ outputs
 work
 dist
 .next
+.vinext
+skills-lock.json
 *.tsbuildinfo

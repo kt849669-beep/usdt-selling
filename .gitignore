@@ -44,6 +44,7 @@ next-env.d.ts
 # Checkout-local execution profile and tool state; never publish them.
 /.sites-runtime/
 /.agents/
+skills-lock.json
 /.codex/
 /outputs/
 /work/
