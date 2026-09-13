@@ -9,7 +9,7 @@ export type Ledger={id:string;user:string;type:string;amount:number;orderId:stri
 export type Audit={id:string;actor:string;action:string;target:string;time:number};
 export type Settings={brand:string;announcement:string;trading:boolean;feeBps:number;orderMinutes:number};
 export type DemoState={users:User[];offers:Offer[];orders:Order[];ledger:Ledger[];audit:Audit[];settings:Settings;treasury:number};
-export type ViewData={user:User|null;role:'user'|'admin'|'guest';users:User[];offers:Offer[];orders:Order[];ledger:Ledger[];audit:Audit[];settings:Settings;treasury:number;revision:number;gateway:{configured:boolean;enabled:boolean;creditEnabled:false;reason:string}};
+export type ViewData={user:User|null;role:'user'|'admin'|'guest';users:User[];offers:Offer[];orders:Order[];ledger:Ledger[];audit:Audit[];settings:Settings;treasury:number;revision:number;registrationCode?:string;gateway:{configured:boolean;enabled:boolean;creditEnabled:false;reason:string}};
 export const number=(n:number,d=2)=>new Intl.NumberFormat('en-IN',{minimumFractionDigits:d,maximumFractionDigits:d}).format(n);
 export const usdt=(n:number,d=2)=>number(n/UNIT,d);
 export const inr=(n:number)=>'₹'+number(n/100);

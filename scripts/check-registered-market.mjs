@@ -10,12 +10,16 @@ let userId='',otherId='',offers=[],orders=[],originalSettings;
 try{
  await admin.call({action:'login',persona:'admin'});
  const before=await admin.call();originalSettings=before.settings;
+ const sharedCode=before.registrationCode;
+ ok(/^NX[0-9A-F]{16}$/.test(sharedCode||''),'Configure NEXA_REGISTRATION_CODE for the local test server');
  if(!before.settings.trading)await admin.call({action:'settings',...before.settings,trading:true});
  await guest.call({action:'login',persona:'u1'},400);
  await client(true).call(undefined,401);
  await user.call({action:'register',name,email,mobile,password:'short'},400);
- await user.call({action:'register',name,email,mobile,password},201);
- await guest.call({action:'register',name,email,mobile,password},409);
+ await user.call({action:'register',name,email,mobile,password},400);
+ await user.call({action:'register',name,email,mobile,password,referralCode:'INVALID'},400);
+ await user.call({action:'register',name,email,mobile,password,referralCode:sharedCode},201);
+ await guest.call({action:'register',name,email,mobile,password,referralCode:sharedCode},409);
  await user.call({action:'login',email,password:'wrong-app-password'},401);
  await user.call({action:'login',email:email.toUpperCase(),password});
  let state=await user.call();userId=state.user.id;

@@ -3,7 +3,7 @@ import {seed} from './demo-seed';
 import {publicOrigin,permittedAdmin,appAdminAuth,applicationOrigin} from './deployment-access';
 import {authenticateAdmin,isCurrentAdmin} from './admin-auth';
 import {GatewayFault,createPayin,submitUtr,payinStatus} from './divinepay';
-import {AuthFault,register,authenticate,registeredIdentity,referralCode,type LocalAccount} from './local-auth';
+import {AuthFault,register,authenticate,registeredIdentity,referralCode,adminRegistrationCode,type LocalAccount} from './local-auth';
 import {UNIT,type DemoState,type Order,type ViewData} from './demo-types';
 const db=()=> (env as unknown as {DB:D1Database}).DB;
 const uid=()=>crypto.randomUUID();
@@ -20,7 +20,7 @@ async function identity(request:Request,admin:boolean){if(admin&&publicOrigin()&
 async function read(){await db().prepare('INSERT INTO demo_state (id,data,revision) VALUES (1,?,1) ON CONFLICT(id) DO NOTHING').bind(JSON.stringify(seed(!!publicOrigin()))).run();const row=await db().prepare('SELECT data,revision FROM demo_state WHERE id=1').first<{data:string;revision:number}>();if(!row)throw new Fault('Local records are unavailable.',503);return {state:JSON.parse(row.data) as DemoState,revision:row.revision};}
 function log(s:DemoState,actor:string,action:string,target:string){s.audit.unshift({id:uid(),actor,action,target,time:Date.now()});}
 function entry(s:DemoState,user:string,type:string,amount:number,orderId='',reference='Simulated transaction'){s.ledger.unshift({id:uid(),user,type,amount,orderId,time:Date.now(),reference});}
-function actorUser(s:DemoState,id:string){const u=s.users.find(u=>u.id===id);if(!u)throw new Fault('Open a demo account to continue.',401);return u;}
+function actorUser(s:DemoState,id:string){const u=s.users.find(u=>u.id===id);if(!u)throw new Fault('Log in to your account to continue.',401);return u;}
 function giveBack(s:DemoState,o:Order,reason:string){const seller=actorUser(s,o.seller);seller.locked-=o.quantity+o.fee;seller.available+=o.quantity+o.fee;o.status='cancelled';o.reason=reason;o.updated=Date.now();const offer=s.offers.find(x=>x.id===o.offerId);if(offer)offer.available+=o.quantity;entry(s,seller.id,'Escrow returned',o.quantity+o.fee,o.id,reason);}
 function release(s:DemoState,o:Order){const seller=actorUser(s,o.seller),buyer=actorUser(s,o.buyer);seller.locked-=o.quantity+o.fee;buyer.available+=o.quantity;s.treasury+=o.fee;o.status='completed';o.updated=Date.now();entry(s,seller.id,'P2P sell',-(o.quantity+o.fee),o.id);entry(s,buyer.id,'P2P buy',o.quantity,o.id);seller.orders++;buyer.orders++;}
 function check(s:DemoState){for(const u of s.users){if(!Number.isSafeInteger(u.available)||!Number.isSafeInteger(u.locked)||u.available<0||u.locked<0)throw new Fault('Balance check failed. No changes saved.',409);const reserved=s.orders.filter(o=>o.seller===u.id&&!['completed','cancelled'].includes(o.status)).reduce((a,o)=>a+o.quantity+o.fee,0);if(reserved!==u.locked)throw new Fault('Escrow check failed. No changes saved.',409);}}
@@ -40,7 +40,7 @@ function view(s:DemoState,id:string,admin:boolean,revision:number):ViewData{
  const offers=(admin?s.offers:s.offers.filter(o=>o.createdBy==='admin'&&o.side==='sell'&&o.active&&!actorUser(s,o.owner).blocked)).map(o=>({...o,available:o.side==='sell'?Math.min(o.available,Math.floor(actorUser(s,o.owner).available/(1+s.settings.feeBps/10000))):o.available}));
  const visible=new Set([...offers.map(o=>o.owner),...orders.flatMap(o=>[o.buyer,o.seller]),id]);
  const users=admin?s.users:s.users.filter(u=>visible.has(u.id)).map(u=>({...u,email:'',mobile:'',referralCode:undefined,referredBy:undefined,available:0,locked:0,payment:''}));
- return {user,role:admin?'admin':user?'user':'guest',users,offers,orders:orders.map(o=>{const {requestFingerprint,...safe}=o;return safe;}),ledger:admin?s.ledger:s.ledger.filter(l=>l.user===id),audit:admin?s.audit:[],settings:s.settings,treasury:admin?s.treasury:0,revision,gateway:gatewayView()};
+ return {...(admin?{registrationCode:adminRegistrationCode()}:{}),user,role:admin?'admin':user?'user':'guest',users,offers,orders:orders.map(o=>{const {requestFingerprint,...safe}=o;return safe;}),ledger:admin?s.ledger:s.ledger.filter(l=>l.user===id),audit:admin?s.audit:[],settings:s.settings,treasury:admin?s.treasury:0,revision,gateway:gatewayView()};
 }
 async function ensureProfile(account:LocalAccount){
  await change(s=>{const existing=s.users.find(u=>u.id===account.id);if(existing){existing.referralCode=referralCode(account.id);existing.referredBy=account.referred_by||null;}else{s.users.push({id:account.id,name:account.name,email:account.email,mobile:account.mobile,referralCode:referralCode(account.id),referredBy:account.referred_by||null,created:account.created,accountType:'registered',available:0,locked:0,kyc:'pending',blocked:false,merchant:false,orders:0,completion:0,payment:''});log(s,account.id,'Registered local account',account.id);}});
@@ -53,21 +53,21 @@ async function sessionResponse(request:Request,admin:boolean,who:string){
 function txt(x:unknown,max=300){return typeof x==='string'?x.trim().slice(0,max):'';}
 function int(x:unknown,min:number,max:number){if(typeof x!=='number'||!Number.isSafeInteger(x)||x<min||x>max)throw new Fault('Enter an amount within the allowed range.');return x;}
 async function body(request:Request){if(!request.headers.get('content-type')?.startsWith('application/json'))throw new Fault('JSON required.');const reader=request.body?.getReader();if(!reader)throw new Fault('Missing request.');let size=0;const chunks:Uint8Array[]=[];while(true){const part=await reader.read();if(part.done)break;size+=part.value.length;if(size>16384){await reader.cancel();throw new Fault('Request too large.',413);}chunks.push(part.value);}const bytes=new Uint8Array(size);let offset=0;for(const c of chunks){bytes.set(c,offset);offset+=c.length;}try{return JSON.parse(new TextDecoder().decode(bytes)) as Record<string,unknown>;}catch{throw new Fault('Invalid request.');}}
-export async function GET(request:Request){try{local(request);const admin=new URL(request.url).searchParams.get('workspace')==='admin';const id=await identity(request,admin);if(admin&&id!=='admin')return response({error:'Open the demo admin workspace.',login:true},401);let {state,revision}=await read();if(state.orders.some(canExpire)){const updated=await change(s=>{for(const o of s.orders)if(canExpire(o)){giveBack(s,o,'Payment timer expired');log(s,'System','Unpaid order expired',o.id);}});state=updated.state;revision=updated.revision;}return response(view(state,id,admin,revision));}catch(e){return failure(e);}}
+export async function GET(request:Request){try{local(request);const admin=new URL(request.url).searchParams.get('workspace')==='admin';const id=await identity(request,admin);if(admin&&id!=='admin')return response({error:'Sign in to the admin workspace.',login:true},401);let {state,revision}=await read();if(state.orders.some(canExpire)){const updated=await change(s=>{for(const o of s.orders)if(canExpire(o)){giveBack(s,o,'Payment timer expired');log(s,'System','Unpaid order expired',o.id);}});state=updated.state;revision=updated.revision;}return response(view(state,id,admin,revision));}catch(e){return failure(e);}}
 export async function POST(request:Request){try{local(request,true);const b=await body(request);if(!b||typeof b!=='object')throw new Fault('Invalid request.');const action=txt(b.action,40);const admin=request.headers.get('x-demo-workspace')==='admin';const id=await identity(request,admin);
 if(action==='register'){if(admin)throw new Fault('Use the user registration page.');const account=await register(request,b);await ensureProfile(account);return response({ok:true,message:'Account created. Log in with your email and Nexa app password.'},201);}
 if(action==='login'){
- if(admin){if(appAdminAuth())return sessionResponse(request,true,await authenticateAdmin(request,b));if(publicOrigin())throw new Fault('Use the protected administrator sign-in.',403);if(b.persona!=='admin')throw new Fault('Open the local demo admin.');return sessionResponse(request,true,'admin');}
+ if(admin){if(appAdminAuth())return sessionResponse(request,true,await authenticateAdmin(request,b));if(publicOrigin())throw new Fault('Use the protected administrator sign-in.',403);if(b.persona!=='admin')throw new Fault('Open the local test admin.');return sessionResponse(request,true,'admin');}
  const account=await authenticate(request,b);await ensureProfile(account);
  return sessionResponse(request,false,account.id);
 }
 if(action==='logout'){await db().prepare('DELETE FROM demo_sessions WHERE token=?').bind(token(request,admin)).run();return response({ok:true},200,{'Set-Cookie':cookieName(admin)+'=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0'});}
-if(!id||(admin&&id!=='admin'))throw new Fault('Open a demo account to continue.',401);
+if(!id||(admin&&id!=='admin'))throw new Fault('Log in to your account to continue.',401);
 if(['checkout','submit_utr','payment_status'].includes(action))return await gatewayAction(request,b,id,admin);
 const updated=await change(s=>{
-const adminOnly=()=>{if(!admin||id!=='admin')throw new Fault('Demo administrator access required.',403);};
+const adminOnly=()=>{if(!admin||id!=='admin')throw new Fault('Administrator access required.',403);};
 const user=admin?null:actorUser(s,id);
-if(user?.blocked&&!['chat','order_action'].includes(action))throw new Fault('This demo account is restricted.',403);
+if(user?.blocked&&!['chat','order_action'].includes(action))throw new Fault('This account is restricted.',403);
 if(action==='admin_create_order')throw new Fault('Register a seller in Sellers & rates. Purchase orders are created by the customer.',400);
 if(action==='normalize_sellers'){
  adminOnly();let count=0;
@@ -85,7 +85,7 @@ if(action==='create_order'){
  if(previous){if(previous.requestFingerprint!==fingerprint)throw new Fault('This request already created a different order. Close and reopen the form.',409);return {orderId:previous.id};}
  if(trader.blocked||trader.accountType!=='registered')throw new Fault('Select an active registered user.');
  if(!s.settings.trading)throw new Fault('Purchases are temporarily paused.');
- if(s.orders.length>=1000)throw new Fault('Local demo order limit reached.');
+ if(s.orders.length>=1000)throw new Fault('Test order limit reached.');
  const offer=s.offers.find(o=>o.id===b.offerId&&o.active&&o.createdBy==='admin'&&o.side==='sell');
  if(!offer)throw new Fault('This seller is unavailable for purchases.');
  if(offer.owner===trader.id)throw new Fault('You cannot buy from your own seller listing.');
@@ -103,7 +103,7 @@ if(action==='create_order'){
 if(action==='order_action'||action==='chat'){
  const o=s.orders.find(o=>o.id===b.orderId);if(!o)throw new Fault('Order not found.',404);
  if(!admin&&![o.buyer,o.seller].includes(id))throw new Fault('This order belongs to another account.',403);
- if(action==='chat'){const message=txt(b.text,1000);if(!message)throw new Fault('Enter a message.');if(o.messages.length>=150)throw new Fault('Demo chat limit reached.');o.messages.push({id:uid(),sender:admin?'Admin':id,text:message,time:Date.now()});return;}
+ if(action==='chat'){const message=txt(b.text,1000);if(!message)throw new Fault('Enter a message.');if(o.messages.length>=150)throw new Fault('Conversation limit reached.');o.messages.push({id:uid(),sender:admin?'Admin':id,text:message,time:Date.now()});return;}
  const op=txt(b.operation,30);
  if(o.paymentMode==='gateway_pending'&&op!=='cancel')throw new Fault('Payment gateway is not connected. Payment confirmation and wallet credit are disabled.',409);
  if(op==='cancel'&&o.payment&&!['failed'].includes(o.payment.phase))throw new Fault('A gateway payment may be in progress. Check its status before cancelling.',409);
@@ -147,7 +147,7 @@ if(action==='offer'){
  else s.offers.unshift({id:'ad-'+uid().slice(0,12),owner:maker.id,...fields,active:true,createdBy:'admin'});
  log(s,'Admin',existing?'Updated listing':'Published listing',existing?.id||maker.id);return;
 }
-if(action==='user_status'){adminOnly();const target=actorUser(s,txt(b.userId,20));if(typeof b.blocked==='boolean')target.blocked=b.blocked;if(b.kyc==='verified'||b.kyc==='pending')target.kyc=b.kyc;log(s,'Admin','Updated demo user status',target.id);return;}
+if(action==='user_status'){adminOnly();const target=actorUser(s,txt(b.userId,20));if(typeof b.blocked==='boolean')target.blocked=b.blocked;if(b.kyc==='verified'||b.kyc==='pending')target.kyc=b.kyc;log(s,'Admin','Updated user status',target.id);return;}
 if(action==='settings'){adminOnly();s.settings={brand:txt(b.brand,20)||'Nexa',announcement:txt(b.announcement,150),trading:b.trading===true,feeBps:int(b.feeBps,0,100),orderMinutes:int(b.orderMinutes,5,60)};log(s,'Admin','Updated platform settings','Settings');return;}
 throw new Fault('Unknown action.');
 });

@@ -5,6 +5,10 @@ const db=()=> (env as unknown as {DB:D1Database}).DB;
 export class AuthFault extends Error {constructor(message:string,public status=400){super(message);}}
 export type LocalAccount={id:string;name:string;email:string;mobile:string;password_hash:string;created:number;referred_by?:string|null};
 export const referralCode=(id:string)=>'NX'+id.replace(/^u-/,'').toUpperCase();
+export function adminRegistrationCode(){
+ const code=(env as unknown as {NEXA_REGISTRATION_CODE?:string}).NEXA_REGISTRATION_CODE?.trim().toUpperCase()||'';
+ return /^NX[0-9A-F]{16}$/.test(code)?code:'';
+}
 const digest=(s:string)=>createHash('sha256').update(s).digest('hex');
 let hashing=false;
 export async function derive(password:string,salt:string){
@@ -35,9 +39,11 @@ export async function register(request:Request,input:Record<string,unknown>){
  if(name.length<2||name.length>50||!/^[0-9]{10}$/.test(mobile))throw new AuthFault('Enter your name and a 10-digit mobile number.');
  if(password.length<15)throw new AuthFault('Use a new Nexa app password of 15–128 characters. Do not use your Gmail password.');
  const code=typeof input.referralCode==='string'?input.referralCode.trim().toUpperCase():'';
+ if(!code)throw new AuthFault('A referral code is required to create an account. Ask your inviter for a code.');
+ if(!/^NX[0-9A-F]{16}$/.test(code))throw new AuthFault('Referral code is not valid.');
  let referredBy:string|null=null;
- if(code){
-  if(!/^NX[0-9A-F]{16}$/.test(code))throw new AuthFault('Referral code is not valid.');
+ if(code===adminRegistrationCode())referredBy='admin';
+ else{
   const owner=await db().prepare('SELECT id FROM local_accounts WHERE id=?').bind('u-'+code.slice(2).toLowerCase()).first<{id:string}>();
   if(!owner)throw new AuthFault('Referral code was not found.');
   referredBy=owner.id;

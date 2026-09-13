@@ -16,7 +16,8 @@ Buy-only USDT/INR application with separate customer and administrator workspace
 3. Run `npm run db:migrate:vercel` with `DATABASE_URL` configured. Schema creation is a separate explicit deployment step, not a request-time action.
 4. Set `NEXA_PUBLIC_ORIGIN` to the exact HTTPS production origin.
 5. Set `NEXA_ADMIN_EMAIL` and `NEXA_ADMIN_PASSWORD_HASH`. The hash format is `scrypt:32768:8:3:<16-byte hex salt>:<32-byte hex hash>`. Never place a plaintext admin password in source.
-6. Keep `NEXA_ENABLE_GATEWAY_CHECKOUT=false`. No payment secret is included.
+6. Set `NEXA_REGISTRATION_CODE` to `NX` followed by 16 random uppercase hexadecimal characters. The reusable shared code is visible only in the authenticated administrator workspace.
+7. Keep `NEXA_ENABLE_GATEWAY_CHECKOUT=false`. No payment secret is included.
 
 For local Next.js testing use `npm run dev:vercel -- --port 3000`. For the retained Sites/D1 development environment use `npm run dev`. Both share UI and domain logic, but have separate persistence and administrator authentication.
 
@@ -42,7 +43,7 @@ A new database has no transferred customer data. The initial seed contains only 
 
 Admins register sellers and set INR prices, names, inventory and limits. Customers can only buy, with outer INR limits of ₹5,000–₹30,000. Seller listing changes appear through periodic refresh. Purchase quotes are checked server-side and stored at order time. No Binance reference price or fabricated discount is used.
 
-Registered users have referral codes and links. Signup attribution is recorded; a referral reward program is not configured.
+New registration requires a valid referral code on both the form and server. Administrators can share one reusable registration code/link from Customers & sellers or Admin profile. Existing user referral codes still work and retain signup attribution. Existing account login is unchanged. A referral reward program is not configured.
 
 ## Payment and wallet limitations
 
