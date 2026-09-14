@@ -46,6 +46,14 @@ try{
  r=await api(undefined,{cookie});check(r.data.user.email===account.email&&r.data.user.available===0,'Own decrypted profile and zero balance');
  check(!JSON.stringify(r.data).includes('password_hash')&&!JSON.stringify(r.data).includes('lookup:v1:'),'No stored credentials or lookup indexes exposed');
  check(!r.data.gateway.enabled&&!r.data.gateway.creditEnabled,'Real funds gate stays closed even with key and environment flag');
+ check(r.data.gateway.configured&&!JSON.stringify(r.data).includes(env.DIVINEPAY_API_KEY),'Server key is configured but never exposed in the API');
+ const gatewayKey=env.DIVINEPAY_API_KEY;delete env.DIVINEPAY_API_KEY;
+ r=await api(undefined,{cookie});check(!r.data.gateway.configured,'No hardcoded key fallback when server key is absent');
+ env.DIVINEPAY_API_KEY=gatewayKey;
+ const stateBeforeCheckout=sqlite.prepare('SELECT data,revision FROM demo_state').get();
+ r=await api({action:'checkout',orderId:'NX-OFFLINE'},{cookie});check(r.status===503,'Live checkout blocked before any external request');
+ const stateAfterCheckout=sqlite.prepare('SELECT data,revision FROM demo_state').get();
+ check(stateBeforeCheckout.data===stateAfterCheckout.data&&stateBeforeCheckout.revision===stateAfterCheckout.revision,'Blocked checkout does not change existing orders or balances');
  r=await api(undefined,{admin:true,headers:{'oai-authenticated-user-id':'spoof','oai-authenticated-user-email':'owner@example.invalid'}});check(r.status===401,'Spoofed Sites headers denied on Vercel');
  const salt=crypto.randomBytes(16).toString('hex'),password=crypto.randomBytes(24).toString('hex');
  env.NEXA_ADMIN_EMAIL='owner@example.invalid';env.NEXA_ADMIN_PASSWORD_HASH='scrypt:32768:8:3:'+salt+':'+(await auth.derive(password,salt)).toString('hex');

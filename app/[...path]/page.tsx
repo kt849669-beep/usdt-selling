@@ -39,6 +39,6 @@ async function AdminRoute({path}:{path:string[]}){
  if(path[1]==='login'&&path.length===2)return hosted?<NexaAdmin hosted/>:<DemoLogin admin/>;
  if(path[1]==='orders'&&path.length===3)return <NexaAdmin hosted={hosted} appAuth={appAuth} screen="order" orderId={path[2]}/>;
  if(path.length===1)return <NexaAdmin hosted={hosted} appAuth={appAuth}/>;
- if(path.length===2&&['users','orders','offers','disputes','reports','settings','profile'].includes(path[1]))return <NexaAdmin hosted={hosted} appAuth={appAuth} screen={path[1]}/>;
+ if(path.length===2&&['users','orders','withdrawals','offers','disputes','reports','settings','profile'].includes(path[1]))return <NexaAdmin hosted={hosted} appAuth={appAuth} screen={path[1]}/>;
 notFound();
 }

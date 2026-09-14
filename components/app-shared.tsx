@@ -10,7 +10,7 @@ import {Empty,EmptyHeader,EmptyTitle,EmptyDescription,EmptyContent,EmptyMedia} f
 import {AlertDialog,AlertDialogContent,AlertDialogHeader,AlertDialogTitle,AlertDialogDescription,AlertDialogFooter,AlertDialogAction,AlertDialogCancel} from '@/components/ui/alert-dialog';
 import {RefreshCw,ArrowUpRight,Inbox} from 'lucide-react';
 import {statusLabel,type ViewData} from '@/lib/types';
-export type Action=(b:Record<string,unknown>)=>Promise<(ViewData&{ok:boolean;result?:{orderId?:string;checkoutUrl?:string;paymentStatus?:string}})|null>;
+export type Action=(b:Record<string,unknown>)=>Promise<(ViewData&{ok:boolean;result?:{orderId?:string;checkoutUrl?:string;paymentStatus?:string;withdrawalId?:string;reserveUsdt?:number}})|null>;
 export function useDemo(admin=false){
  const [data,setData]=useState<ViewData|null>(null),[error,setError]=useState(''),[busy,setBusy]=useState(false),[login,setLogin]=useState(false);
  const working=useRef(false);
